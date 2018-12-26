@@ -123,8 +123,6 @@ class Player(object):
         self.thread = None
         self.setup_thread = None
 
-        self.setup_async()
-
     def setup(self):
         self.serial = serial.Serial(self.port, self.baudrate)
 

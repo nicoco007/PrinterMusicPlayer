@@ -52,19 +52,20 @@ for track in mid.tracks:
                 # note end
                 start_tick = notes[evt.note]
                 length = current_tick - start_tick
+                start = mido.tick2second(start_tick, mid.ticks_per_beat, tempo)
                 duration = mido.tick2second(length, mid.ticks_per_beat, tempo)
 
                 added = False
 
                 for channel in ptrack.channels:
-                    if channel.can_add_note(start_tick):
-                        channel.add_note(evt.note, start_tick, duration)
+                    if channel.can_add_note(start):
+                        channel.add_note(evt.note, start, duration)
                         added = True
                         break
                 
                 if not added:
                     channel = PrinterMusicChannel()
-                    channel.add_note(evt.note, start_tick, duration)
+                    channel.add_note(evt.note, start, duration)
                     ptrack.add_channel(channel)
 
                 del notes[evt.note]
