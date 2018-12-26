@@ -18,12 +18,13 @@
 import argparse
 import mido
 from music_file import *
+import os
 import sys
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--input", "-i", required=True, type=str)
-parser.add_argument("--output", "-o", required=True, type=str)
+parser.add_argument("input", type=str)
+parser.add_argument("output", type=str, nargs="?")
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -99,5 +100,16 @@ def sanity_check():
                 b = loaded.tracks[i].channels[j].notes[k]
                 print("{} {:.5f} == {} {:.5f}".format(a.note if type(a) is PrinterMusicNote else "pause", a.duration, b.note if type(a) is PrinterMusicNote else "pause", b.duration))
 
-file.save(args.output)
+if args.output:
+    output_file = args.output
+
+    if not output_file.endswith(".3dpm"):
+        if output_file.endswith("."):
+            output_file += "3dpm"
+        else:
+            output_file += ".3dpm"
+else:
+    output_file = os.path.splitext(args.input)[0] + ".3dpm"
+
+file.save(output_file)
 file.print_info()
