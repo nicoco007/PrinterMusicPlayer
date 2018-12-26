@@ -17,6 +17,7 @@
 
 import argparse
 import mido
+from music_file import *
 import sys
 
 parser = argparse.ArgumentParser()
@@ -30,73 +31,59 @@ args = parser.parse_args(sys.argv[1:])
 
 mid = mido.MidiFile(args.input)
 
-tempo = 500000
+file = PrinterMusicFile()
 
-c = 0
-previous_note = None
-time = 0
+for track in mid.tracks:
+    tempo = 500000
+    ptrack = PrinterMusicTrack()
+    notes = {}
+    current_tick = 0
 
-channels = []
-channel_ticks = []
-current_notes = {}
-current_tick = 0
+    for evt in track:
+        #if evt.type == "set_tempo":
+        #    tempo = evt.tempo
+        
+        if evt.type == "note_on":
+            current_tick += evt.time
 
-def fill_to(channel, ticks):
-    pause_length = mido.tick2second(ticks - channel_ticks[channel], mid.ticks_per_beat, tempo)
-    
-    if pause_length > 0:
-        channels[channel].append((None, pause_length))
-
-def add_note(channel, note, duration):
-    length = mido.tick2second(ticks, mid.ticks_per_beat, tempo)
-    pause_length = mido.tick2second(current_tick - ticks - channel_ticks[channel], mid.ticks_per_beat, tempo)
-
-    if channel_ticks[channel] < current_tick - ticks:
-        channels[channel].append((None, pause_length))
-
-    channels[channel].append((evt.note, length))
-    channel_ticks[channel] = current_tick
-
-for evt in mid.tracks[args.track]:
-    #if evt.type == "set_tempo":
-    #    tempo = evt.tempo
-    
-    if evt.type == "note_on":
-        current_tick += evt.time
-
-        if evt.velocity > 0:
-            # note start
-            current_notes[evt.note] = current_tick
-        else:
-            # note end
-            start_tick = current_notes[evt.note]
-            ticks = current_tick - start_tick
-
-            success = False
-
-            for i in range(len(channels)):
-                if channel_ticks[i] <= current_tick - ticks:
-                    add_note(i, evt.note, ticks)
-                    success = True
-                    break
-            
-            if not success:
-                i = len(channels)
-                channels.append([])
-                channel_ticks.append(0)
-                add_note(i, evt.note, ticks)
-
-            del current_notes[evt.note]
-
-m = max(channel_ticks)
-
-for i in range(len(channels)):
-    fill_to(i, m)
-
-for i in range(len(channels)):
-    with open(args.output + "_" + str(i), "w") as f:
-        for note, duration in channels[i]:
-            if note is None:
-                f.write("P {}\n".format(duration))
+            if evt.velocity > 0:
+                # note start
+                notes[evt.note] = current_tick
             else:
-                f.write("N {} {}\n".format(note + args.octave * 12, duration))
+                # note end
+                start_tick = notes[evt.note]
+                length = current_tick - start_tick
+                duration = mido.tick2second(length, mid.ticks_per_beat, tempo)
+
+                added = False
+
+                for channel in ptrack.channels:
+                    if channel.can_add_note(start_tick):
+                        channel.add_note(evt.note, start_tick, duration)
+                        added = True
+                        break
+                
+                if not added:
+                    channel = PrinterMusicChannel()
+                    channel.add_note(evt.note, start_tick, duration)
+                    ptrack.add_channel(channel)
+
+                del notes[evt.note]
+    
+    file.add_track(ptrack)
+
+file.save(args.output)
+loaded = PrinterMusicFile.load(args.output)
+
+print(str(len(file.tracks)) + " " + str(len(loaded.tracks)))
+
+for i in range(len(file.tracks)):
+    print("{} {}".format(len(file.tracks[i].channels), len(loaded.tracks[i].channels)))
+
+    for j in range(len(file.tracks[i].channels)):
+        print("{} {}".format(len(file.tracks[i].channels[j].notes), len(loaded.tracks[i].channels[j].notes)))
+
+        for k in range(len(file.tracks[i].channels[j].notes)):
+            a = file.tracks[i].channels[j].notes[k]
+            b = loaded.tracks[i].channels[j].notes[k]
+            print("{} {:.5f} == {} {:.5f}".format(a.note if type(a) is PrinterMusicNote else "pause", a.duration, b.note if type(a) is PrinterMusicNote else "pause", b.duration))
