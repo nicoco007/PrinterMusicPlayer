@@ -15,13 +15,16 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import argparse
 from color_formatter import ColorFormatter
 import logging
+from music_file import *
 import serial
 import sys
 import threading
 import time
 import re
+import sys
 
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
@@ -29,9 +32,16 @@ handler.setFormatter(ColorFormatter(fmt="%(asctime)s [%(levelname)s] {%(filename
 
 logging.basicConfig(level=logging.DEBUG, handlers=[handler])
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument("file", type=str)
+parser.add_argument("--printer", "-p", nargs="+", type=str, required=True)
+
+args = parser.parse_args(sys.argv[1:])
+
 notes = {
-    43: 235, # G3
-    44: 249, # G3#
+    43: 235, # G2
+    44: 249, # G2#
     45: 264, # A3
     46: 280, # A3#
     47: 296, # B3
@@ -82,11 +92,32 @@ notes = {
     92: 3980  # G#
 }
 
+class PlayerCoordinator(object):
+    def __init__(self, file_path):
+        self.file = PrinterMusicFile.load(file_path)
+        self.players = []
+    
+    def add_player(self, track_id, channel_id, port, baudrate = 250000):
+        self.players.append(Player(self.file.tracks[track_id].channels[channel_id], port, baudrate))
+    
+    def play(self, delay = 2):
+        for player in self.players:
+            player.setup_async()
+        
+        for player in self.players:
+            player.wait_for_setup()
+        
+        time.sleep(delay)
+
+        for player in self.players:
+            player.play()
+
 class Player(object):
-    def __init__(self, path, port):
+    def __init__(self, channel, port, baudrate = 250000):
         self.logger = logging.getLogger("{}[{}]".format(self.__class__.__name__, port))
-        self.lines = open(path).readlines()
+        self.channel = channel
         self.port = port
+        self.baudrate = baudrate
         self.current_distance = 200
         self.current_direction = -1
         self.thread = None
@@ -95,7 +126,7 @@ class Player(object):
         self.setup_async()
 
     def setup(self):
-        self.serial = serial.Serial(self.port, 250000)
+        self.serial = serial.Serial(self.port, self.baudrate)
 
         while not self.serial.readline():
             pass
@@ -114,6 +145,13 @@ class Player(object):
     def setup_async(self):
         self.setup_thread = threading.Thread(target=self.setup)
         self.setup_thread.start()
+
+    def sanity_check(self):
+        for event in self.channel.notes:
+            if type(event) is PrinterMusicNote and not min(notes.keys()) <= event.note <= max(notes.keys()):
+                print("{} is out of range!".format(event.note))
+        
+        print("Sanity check complete")
     
     def wait_for_setup(self):
         if self.setup_thread:
@@ -127,17 +165,8 @@ class Player(object):
         start_time = time.time()
         expected_time = 0
 
-        while self.lines:
-            l = self.lines.pop(0)
-            
-            args = l.strip().split(" ")
-            cmd = args.pop(0)
-            
-            if cmd == "N":
-                length = float(args[1])
-            elif cmd == "P":
-                length = float(args[0])
-            
+        for event in self.channel.notes:
+            length = event.duration
             actual_time = time.time() - start_time
             diff = expected_time - actual_time # negative if we're behind
 
@@ -148,6 +177,7 @@ class Player(object):
                 self.logger.warning("Skipping event")
                 continue
 
+            # warn if over 500 ms
             if abs(diff) > 0.5:
                 self.logger.warning("Adjusting by {:.5f} s".format(diff))
             else:
@@ -155,13 +185,11 @@ class Player(object):
 
             length += diff
             
-            if cmd == "N":
-                note = int(args[0])
-
-                if note in notes:
-                    self.send_note(note, length)
+            if type(event) == PrinterMusicNote:
+                if event.note in notes:
+                    self.send_note(event.note, length)
                 else:
-                    self.logger.warning("Note {} is out of range! Waiting instead.".format(note))
+                    self.logger.warning("Note {} is out of range! Waiting instead.".format(event.note))
                     self.send_sleep(length)
             else:
                 self.send_sleep(length)
@@ -191,28 +219,20 @@ class Player(object):
     def send_wait(self, cmd):
         self.send(cmd)
 
+        # wait for acknowledgement
         while self.serial.readline() != b"ok\n":
             pass
     
     def wait_for_exit(self):
         self.thread.join()
 
-s1 = Player("rock_0.mcode_0", "/dev/ttyACM3")
-s2 = Player("rock_0.mcode_1", "/dev/ttyACM1")
-s3 = Player("rock_0.mcode_2", "/dev/ttyACM0")
-s4 = Player("rock_1.mcode_0", "/dev/ttyACM4")
-s5 = Player("rock_1.mcode_1", "/dev/ttyACM2")
+coord = PlayerCoordinator(args.file)
 
-s1.wait_for_setup()
-s2.wait_for_setup()
-s3.wait_for_setup()
-s4.wait_for_setup()
-s5.wait_for_setup()
+for printer in args.printer:
+    if not len(printer.split(":")) == 3:
+        continue
 
-time.sleep(2)
+    track, channel, port = printer.split(":")
+    coord.add_player(int(track), int(channel), port)
 
-s1.play()
-s2.play()
-s3.play()
-s4.play()
-s5.play()
+coord.play()
