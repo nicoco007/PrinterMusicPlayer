@@ -46,6 +46,7 @@ class PrinterMusicFile(object):
                             channel.add_note(note, position, duration)
                         elif t == 0x1:
                             duration = struct.unpack(">f", f.read(4))[0]
+                            channel.pause_until(position + duration)
                         
                         position += duration
                     
@@ -77,6 +78,17 @@ class PrinterMusicFile(object):
     
     def add_track(self, track):
         self.tracks.append(track)
+
+    def print_info(self):
+        print("PrinterMusicFile")
+        print("{} tracks".format(len(self.tracks)))
+
+        for i, track in enumerate(self.tracks):
+            print("\nTrack {}".format(i))
+            print("  {} channels".format(len(track.channels)))
+            
+            for j, channel in enumerate(track.channels):
+                print("  Channel {}: {} events".format(j, len(channel.notes)))
 
 class PrinterMusicTrack(object):
     def __init__(self):
