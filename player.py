@@ -151,7 +151,7 @@ class Player(object):
         self.setup_thread.start()
 
     def sanity_check(self):
-        for event in self.channel.notes:
+        for event in self.channel.events:
             if type(event) is PrinterMusicNote and not min(notes.keys()) <= event.note <= max(notes.keys()):
                 print("{} is out of range!".format(event.note))
         
@@ -169,7 +169,7 @@ class Player(object):
         start_time = time.time()
         expected_time = 0
 
-        for event in self.channel.notes:
+        for event in self.channel.events:
             length = event.duration
             actual_time = time.time() - start_time
             diff = expected_time - actual_time # negative if we're behind
