@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import os
 import struct
 
 class PrinterMusicFile(object):
@@ -35,7 +36,6 @@ class PrinterMusicFile(object):
                 for j in range(channelCount):
                     channel = PrinterMusicChannel()
                     noteCount = struct.unpack(">I", f.read(4))[0]
-                    position = 0
 
                     for k in range(noteCount):
                         t = struct.unpack(">B", f.read(1))[0]
@@ -43,12 +43,10 @@ class PrinterMusicFile(object):
                         if t == 0x0:
                             note = struct.unpack(">b", f.read(1))[0]
                             duration = struct.unpack(">f", f.read(4))[0]
-                            channel.add_note(note, position, duration)
+                            channel.add_note(note, duration)
                         elif t == 0x1:
                             duration = struct.unpack(">f", f.read(4))[0]
-                            channel.pause_until(position + duration)
-                        
-                        position += duration
+                            channel.add_pause(duration)
                     
                     track.add_channel(channel)
             
@@ -57,6 +55,14 @@ class PrinterMusicFile(object):
         return file
     
     def save(self, path):
+        path = os.path.realpath(path)
+
+        if not path.endswith(".3dpm"):
+            if path.endswith("."):
+                path += "3dpm"
+            else:
+                path += ".3dpm"
+
         with open(path, "wb") as f:
             f.write(struct.pack(">B", len(self.tracks)))
 
@@ -64,9 +70,9 @@ class PrinterMusicFile(object):
                 f.write(struct.pack(">B", len(track.channels)))
 
                 for channel in track.channels:
-                    f.write(struct.pack(">I", len(channel.notes)))
+                    f.write(struct.pack(">I", len(channel.events)))
 
-                    for evt in channel.notes:
+                    for evt in channel.events:
                         if type(evt) is PrinterMusicNote:
                             f.write(struct.pack(">B", 0x0))
                             f.write(struct.pack(">b", evt.note))
@@ -74,8 +80,38 @@ class PrinterMusicFile(object):
                         elif type(evt) is PrinterMusicPause:
                             f.write(struct.pack(">B", 0x1))
                             f.write(struct.pack(">f", evt.duration))
+        
+        return path
 
-    
+    def normalize_channel_lengths(self):
+        max_length = 0
+
+        for track in self.tracks:
+            for channel in track.channels:
+                if channel.duration > max_length:
+                    max_length = channel.duration
+
+        for track in self.tracks:
+            for channel in track.channels:
+                channel.add_pause(max_length - channel.duration)
+
+    def __str__(self):
+        lst = []
+
+        for i, track in enumerate(self.tracks):
+            lst.append("Track {}\n".format(i + 1))
+            for j, channel in enumerate(track.channels):
+                lst.append("  Channel {}\n".format(j + 1))
+                for k, event in enumerate(channel.events):
+                    if type(event) is PrinterMusicNote:
+                        lst.append("    {:>6s} {:10.5f}\n".format(event.get_note_name(), event.duration))
+                    else:
+                        lst.append("    {:>6s} {:10.5f}\n".format("pause", event.duration))
+                lst.append("\n")
+
+        return "".join(lst)
+
+
     def add_track(self, track):
         self.tracks.append(track)
 
@@ -84,11 +120,11 @@ class PrinterMusicFile(object):
         print("{} tracks".format(len(self.tracks)))
 
         for i, track in enumerate(self.tracks):
-            print("\nTrack {}".format(i))
+            print("\nTrack {}".format(i + 1))
             print("  {} channels".format(len(track.channels)))
             
             for j, channel in enumerate(track.channels):
-                print("  Channel {}: {} events".format(j, len(channel.notes)))
+                print("  Channel {}: {} events, {:0.5f} s".format(j + 1, len(channel.events), channel.duration))
 
 class PrinterMusicTrack(object):
     def __init__(self):
@@ -99,29 +135,26 @@ class PrinterMusicTrack(object):
 
 class PrinterMusicChannel(object):
     def __init__(self):
-        self.notes = []
-        self.current_position = 0
+        self.events = []
+        self.duration = 0
 
-    def can_add_note(self, position):
-        return position >= self.current_position
-
-    def add_note(self, note, position, duration):
-        if not self.can_add_note(position):
-            raise Exception("Position is before last note : {} >= {}".format(position, self.current_position))
-
-        self.pause_until(position)
-        self.notes.append(PrinterMusicNote(note, duration))
-        self.current_position = position + duration
-    
-    def pause_until(self, position):
-        if not self.can_add_note(position):
-            raise Exception("Position is before last note : {} >= {}".format(position, self.current_position))
-
-        if position == self.current_position:
+    def add_note(self, note, duration):
+        if duration < 0:
+            raise Exception("Duration cannot be negative")
+        elif duration == 0:
             return
 
-        self.notes.append(PrinterMusicPause(position - self.current_position))
-        self.current_position = position
+        self.events.append(PrinterMusicNote(note, duration))
+        self.duration += duration
+    
+    def add_pause(self, duration):
+        if duration < 0:
+            raise Exception("Duration cannot be negative")
+        elif duration == 0:
+            return
+
+        self.events.append(PrinterMusicPause(duration))
+        self.duration += duration
 
     def __repr__(self):
         return "PrinterMusicNote" + str(self.__dict__)
@@ -142,23 +175,10 @@ class PrinterMusicNote(PrinterMusicEvent):
         self.duration = duration
     
     def get_note_name(self):
-        letters = {
-            0: "A",
-            1: "A#",
-            2: "B",
-            3: "C",
-            4: "C#",
-            5: "D",
-            6: "D#",
-            7: "E",
-            8: "F",
-            9: "F#",
-            10: "G",
-            11: "G#"
-        }
+        letters = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
 
         letter = letters[(self.note + 3) % 12]
-        octave = (self.note - 12) // 12
+        octave = (self.note // 12) - 1
 
         return letter + str(octave)
     

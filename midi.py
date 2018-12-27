@@ -25,6 +25,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("input", type=str)
 parser.add_argument("output", type=str, nargs="?")
+parser.add_argument("--dont-normalize", action="store_true", default=False)
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -59,57 +60,26 @@ for track in mid.tracks:
                 added = False
 
                 for channel in ptrack.channels:
-                    if channel.can_add_note(start):
-                        channel.add_note(evt.note, start, duration)
+                    if channel.duration <= start:
+                        channel.add_pause(start - channel.duration)
+                        channel.add_note(evt.note, duration)
                         added = True
                         break
                 
                 if not added:
                     channel = PrinterMusicChannel()
-                    channel.add_note(evt.note, start, duration)
+                    channel.add_pause(start)
+                    channel.add_note(evt.note, duration)
                     ptrack.add_channel(channel)
 
                 del notes[evt.note]
     
     file.add_track(ptrack)
 
-max_length = 0
+if not args.dont_normalize:
+    file.normalize_channel_lengths()
 
-for track in file.tracks:
-    for channel in track.channels:
-        if channel.current_position > max_length:
-            max_length = channel.current_position
-
-for track in file.tracks:
-    for channel in track.channels:
-        channel.pause_until(max_length)
-
-def sanity_check():
-    loaded = PrinterMusicFile.load(args.output)
-
-    print(str(len(file.tracks)) + " " + str(len(loaded.tracks)))
-
-    for i in range(len(file.tracks)):
-        print("{} {}".format(len(file.tracks[i].channels), len(loaded.tracks[i].channels)))
-
-        for j in range(len(file.tracks[i].channels)):
-            print("{} {}".format(len(file.tracks[i].channels[j].notes), len(loaded.tracks[i].channels[j].notes)))
-
-            for k in range(len(file.tracks[i].channels[j].notes)):
-                a = file.tracks[i].channels[j].notes[k]
-                b = loaded.tracks[i].channels[j].notes[k]
-                print("{} {:.5f} == {} {:.5f}".format(a.note if type(a) is PrinterMusicNote else "pause", a.duration, b.note if type(a) is PrinterMusicNote else "pause", b.duration))
-
-if args.output:
-    output_file = args.output
-
-    if not output_file.endswith(".3dpm"):
-        if output_file.endswith("."):
-            output_file += "3dpm"
-        else:
-            output_file += ".3dpm"
-else:
-    output_file = os.path.splitext(args.input)[0] + ".3dpm"
-
-file.save(output_file)
 file.print_info()
+output_file = file.save(args.output if args.output else os.path.splitext(args.input)[0])
+
+print("\nSaved to " + output_file)
