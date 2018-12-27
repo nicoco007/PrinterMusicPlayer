@@ -33,16 +33,16 @@ mid = mido.MidiFile(args.input)
 
 file = PrinterMusicFile()
 max_len = 0
+tempo = 500000 # tempo seems to be set globally and not on a track-by-track basis (for Musescore exports at least)
 
 for track in mid.tracks:
-    tempo = 500000
-    ptrack = PrinterMusicTrack()
+    pmtrack = PrinterMusicTrack()
     notes = {}
     current_tick = 0
 
     for evt in track:
-        #if evt.type == "set_tempo":
-        #    tempo = evt.tempo
+        if evt.type == "set_tempo":
+            tempo = evt.tempo
         
         if evt.type == "note_on":
             current_tick += evt.time
@@ -59,7 +59,7 @@ for track in mid.tracks:
 
                 added = False
 
-                for channel in ptrack.channels:
+                for channel in pmtrack.channels:
                     if channel.duration <= start:
                         channel.add_pause(start - channel.duration)
                         channel.add_note(evt.note, duration)
@@ -70,11 +70,11 @@ for track in mid.tracks:
                     channel = PrinterMusicChannel()
                     channel.add_pause(start)
                     channel.add_note(evt.note, duration)
-                    ptrack.add_channel(channel)
+                    pmtrack.add_channel(channel)
 
                 del notes[evt.note]
     
-    file.add_track(ptrack)
+    file.add_track(pmtrack)
 
 if not args.dont_normalize:
     file.normalize_channel_lengths()
