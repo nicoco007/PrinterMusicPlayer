@@ -113,29 +113,35 @@ class PlayerCoordinator(object):
             player.play()
 
 class Player(object):
+    MIN_DIST = 0
+    MAX_DIST = 200
+    START = 200
+    START_DIR = -1
+
     def __init__(self, channel, port, baudrate = 250000):
         self.logger = logging.getLogger("{}[{}]".format(self.__class__.__name__, port))
         self.channel = channel
         self.port = port
         self.baudrate = baudrate
-        self.current_distance = 200
-        self.current_direction = -1
+        self.current_distance = Player.START
+        self.current_direction = Player.START_DIR
         self.thread = None
         self.setup_thread = None
 
     def setup(self):
         self.serial = serial.Serial(self.port, self.baudrate)
 
+        # wait for response from printer
         while not self.serial.readline():
             pass
         
         self.logger.info("Connected to " + self.port)
 
         self.send_wait("M400")
-        self.send_wait("M201 Z1500")
-        self.send_wait("M203 Z5000")
+        self.send_wait("M201 Z1500") # max acceleration
+        self.send_wait("M203 Z5000") # max feedrate
         self.send_wait("G28 Z0")
-        self.send_wait("G0 Z200 F2000")
+        self.send_wait("G0 {} F2000".format(Player.START))
         self.send_wait("M400")
 
         self.logger.info("Ready!")
@@ -197,9 +203,9 @@ class Player(object):
 
     def send_note(self, note, duration):
         speed = notes[note]
-        distance = (speed / 60.0) * duration
+        distance = (speed / 60.0) * duration # feedrate is in mm/min
 
-        if not (0 <= self.current_distance + distance * self.current_direction <= 200):
+        if not (Player.MIN_DIST <= self.current_distance + distance * self.current_direction <= Player.MAX_DIST):
             self.current_direction *= -1
 
         self.current_distance += distance * self.current_direction
