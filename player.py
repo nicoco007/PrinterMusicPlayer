@@ -130,9 +130,11 @@ class Player(object):
 
     def setup(self):
         self.serial = serial.Serial(self.port, self.baudrate)
+        self.serial.close()
+        self.serial.open()
 
         # wait for response from printer
-        while not self.serial.readline():
+        while not self.serial.readline().startswith(b"start"):
             pass
         
         self.logger.info("Connected to " + self.port)
@@ -141,7 +143,7 @@ class Player(object):
         self.send_wait("M201 Z1500") # max acceleration
         self.send_wait("M203 Z5000") # max feedrate
         self.send_wait("G28 Z0")
-        self.send_wait("G0 {} F2000".format(Player.START))
+        self.send_wait("G0 Z{} F2000".format(Player.START))
         self.send_wait("M400")
 
         self.logger.info("Ready!")
@@ -153,7 +155,7 @@ class Player(object):
     def sanity_check(self):
         for event in self.channel.events:
             if type(event) is PrinterMusicNote and not min(notes.keys()) <= event.note <= max(notes.keys()):
-                print("{} is out of range!".format(event.note))
+                self.logger.error("{} is out of range!".format(event.note))
         
         print("Sanity check complete")
     
@@ -178,7 +180,9 @@ class Player(object):
 
             # skip if current event is shorted than difference
             if length < -diff:
-                self.logger.warning("Skipping event")
+                if type(event) == PrinterMusicNote:
+                    self.logger.warning("Skipping note!")
+
                 continue
 
             # warn if over 500 ms
